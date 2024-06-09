@@ -1,0 +1,11 @@
+
+
+
+# build output
+*.exe
+*.bin
+*.app
+*.pdb
+
+# user files
+user**
