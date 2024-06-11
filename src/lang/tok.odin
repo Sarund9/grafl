@@ -5,10 +5,11 @@ package lang
 Tok :: struct {
     type: TokType,
     start, end: Pos,
+    value: string,
 }
 
 TokType :: enum u16 {
-    Error_Unknown,
+    Unknown,
     Identifier,
     LineStart, // First token each line, points to the line's whitespace
     StringLiteral,
@@ -76,4 +77,17 @@ tok_slice :: proc(text: string, tok: Tok) -> string {
     e := tok.end.char
 
     return text[s:e]
+}
+
+precedence :: proc(tok: TokType) -> int {
+    #partial switch tok {
+    case .Asterisk, .ForwardSlash, .Percent, .Ampersand:
+        return 7
+    case .Plus, .Minus, .VerticalBar, .Tilde:
+        return 6
+    case .GreaterThan, .LessThan:
+        return 5
+    case:
+        return -1
+    }
 }

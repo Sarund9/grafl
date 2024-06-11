@@ -13,14 +13,29 @@ import str "core:strings"
 
 
 Lexer :: struct {
-    allocator: runtime.Allocator,
+    stringArena: runtime.Arena,
+
     stream: io.Reader,
+    stringBuffer: str.Builder,
     exit: bool,
     tokens: [dynamic]Tok,
 
     char: rune,
     charsize: int,
     current, last, start: Pos,
+
+    linestate: enum {
+        Begin,
+        During,
+    },
+}
+
+tokenize_src :: proc(
+    using lex: ^Lexer,
+    source: string,
+) {
+    read: str.Reader
+    tokeinze(lex, str.to_reader(&read, source))
 }
 
 tokeinze :: proc(
@@ -29,21 +44,29 @@ tokeinze :: proc(
 ) {
     stream = reader
     
-    if allocator.procedure == nil {
-        allocator = context.allocator
-    }
-    context.allocator = allocator
-
     current.line = 1
     current.col = 1
 
-    // TODO: Starting Line Whitespace detection on first line
+    str.builder_init(&stringBuffer)
+    defer str.builder_destroy(&stringBuffer)
 
     next(lex)
+
+
+    // TODO: BUGFIX
+    // Place .LineStart tokens in lines without spaces
+    // Use a flag to check if we have added it, reset it on a new line
+    // Trim multiple LineStart tokens that are consecutive
+
+    // if char != ' ' {
+    //     send(lex, .LineStart, true)
+    // }
+    newline(lex)
 
     // ROOT
     for !exit do switch char {
     case '\n', '\r':
+        linestate = .Begin
         newline(lex)
     case ' ':
         next(lex) // Skip whitespace for now..
@@ -76,8 +99,9 @@ tokeinze :: proc(
             next(lex)
             // TODO: Count whitespace
         case:
-            if wcount > 0 {
+            if wcount > 0 || linestate == .Begin {
                 send(lex, .LineStart)
+                linestate = .During
             }
             return
         }
@@ -94,6 +118,7 @@ tokeinze :: proc(
         start = last
         for do switch char {
         case 'a'..='z', 'A'..='Z', '_', '0'..='9', '.':
+            str.write_rune(&stringBuffer, char)
             next(lex)
             if exit do return
         case:
@@ -107,6 +132,7 @@ tokeinze :: proc(
         start = last
         for do switch char {
         case 'a'..='z', 'A'..='Z', '_', '0'..='9':
+            str.write_rune(&stringBuffer, char)
             next(lex)
             if exit do return
         case:
@@ -118,16 +144,18 @@ tokeinze :: proc(
     stringlit :: proc(using lex: ^Lexer) {
         start = last
         next(lex)
+
+        defer send(lex, .StringLiteral)
+
         for do switch char {
         case '"':
             next(lex)
-            send(lex, .StringLiteral)
             return
         case '\n', '\r':
             // ERROR: unterminated string
-            send(lex, .StringLiteral)
             return
         case:
+            str.write_rune(&stringBuffer, char)
             next(lex)
 
             if exit {
@@ -172,16 +200,29 @@ tokeinze :: proc(
         case '?': return .QuestionMark
 
         case:
-            return .Error_Unknown
+            return .Unknown
         }
     }
 
-    send :: proc(using lex: ^Lexer, type: TokType, use_current := false) {
-        append(&tokens, Tok {
+    send :: proc(
+        using lex: ^Lexer, type: TokType,
+        use_current := false,
+    ) {
+        tok := Tok {
             type = type,
             start = lex.start,
             end = use_current ? current : last,
-        })
+        }
+
+        if str.builder_len(stringBuffer) > 0 {
+            tok.value = str.clone(
+                str.to_string(stringBuffer),
+                runtime.arena_allocator(&stringArena)
+            )
+            str.builder_reset(&stringBuffer)
+        }
+
+        append(&tokens, tok)
     }
     
     next :: proc(using lex: ^Lexer) {
