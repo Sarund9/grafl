@@ -76,6 +76,8 @@ tokeinze :: proc(
         identifier(lex)
     case '"':
         stringlit(lex)
+    case '#':
+        comments(lex)
     case:
         start = last
         send(lex, operator(char), true)
@@ -86,12 +88,18 @@ tokeinze :: proc(
 
     // NEWLINE
     newline :: proc(using lex: ^Lexer) {
-        wcount: int
+        wcount, lcount: int
         for do switch char {
         case '\n', '\r':
             wcount = 0
             next(lex)
+            lcount += 1
         case ' ':
+            if lcount > 0 {
+                current.col = 0
+                current.line += u64(lcount / 2)
+                lcount = 0
+            }
             if wcount == 0 {
                 start = current
             }
@@ -99,6 +107,11 @@ tokeinze :: proc(
             next(lex)
             // TODO: Count whitespace
         case:
+            if lcount > 0 {
+                current.col = 0
+                current.line += u64(lcount / 2)
+                lcount = 0
+            }
             if wcount > 0 || linestate == .Begin {
                 send(lex, .LineStart)
                 linestate = .During
@@ -111,7 +124,18 @@ tokeinze :: proc(
 
     }
 
-    
+    comments :: proc(using lex: ^Lexer) {
+        start = last
+        for do switch char {
+        case '\n', '\r':
+            send(lex, .Comment)
+            return
+        case:
+            str.write_rune(&stringBuffer, char)
+            next(lex)
+            if exit do return
+        }
+    }
 
     // IDENTIFIERS and NUMBERS
     number :: proc(using lex: ^Lexer) {
@@ -155,7 +179,6 @@ tokeinze :: proc(
             // ERROR: unterminated string
             return
         case:
-            str.write_rune(&stringBuffer, char)
             next(lex)
 
             if exit {
@@ -236,6 +259,7 @@ tokeinze :: proc(
         }
 
         current.char += u64(charsize)
+        current.col += 1
     }
 
     // getstr :: proc(using lex: ^Lexer) -> string {

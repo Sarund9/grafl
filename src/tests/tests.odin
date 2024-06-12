@@ -111,9 +111,7 @@ parser :: proc(_: ^testing.T) {
     }
     */
     source := `
-a = 5
-b = 8
-c = a + b
+hello = "World"
 `
 
     lex: Lexer
@@ -198,6 +196,9 @@ c = a + b
         case Expr_Number:
             wprint(out, e.value)
             write_string(out, "\n")
+        case Expr_String:
+            write_quoted_string(out, e.value)
+            write_string(out, "\n")
         case Expr_Operation:
             wprint(out, e.operator)
             write_string(out, "(\n")
@@ -216,6 +217,8 @@ c = a + b
             write_string(out, "\n")
         case Object:
             write_string(out, "{ ... }\n")
+        case:
+            write_string(out, "\n")
         }
     }
 

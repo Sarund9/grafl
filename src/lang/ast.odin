@@ -33,6 +33,7 @@ Member :: struct {
 Expr :: union {
     Expr_Var,
     Expr_Number,
+    Expr_String,
     Expr_Operation,
     Object,
 }
@@ -41,6 +42,10 @@ Expr_Var :: distinct string
 
 Expr_Number :: struct {
     value: f64,
+}
+
+Expr_String :: struct {
+    value: string,
 }
 
 Expr_Operation :: struct {
@@ -64,6 +69,7 @@ Parser :: struct {
     tok: Tok,
     exit: bool,
     doc: ^Document,
+    paren_scope: int,
 }
 
 parse :: proc(
@@ -80,62 +86,52 @@ parse :: proc(
         return
     }
 
-    tok = tokens[tok_index]
+    tok_index = -1
+    next(par)
+    // tok = tokens[tok_index]
+
 
     for !exit do #partial switch tok.type {
     case .LineStart:
-        space := tok.end.col - tok.start.col
-        next(par) // Eat the line-start token
-        
-        if exit do break // End of File token
-
-        // Attept to add a Member
-        key, mem, ok := root_scope(par)
-        if ok {
-            doc.members[key] = mem
-        }
+        next(par) // eat line start
+    case .Identifier:
+        statement(par)
     case:
         unexpected(par)
     }
-    
+
     // ------------- \\
 
-    root_scope :: proc(using par: ^Parser) -> (key: string, mem: Member, ok: bool) {
-        #partial switch par.tok.type {
-        case .Identifier:
-            key = tok.value
-            next(par) // consume identifier
-            mem, ok = member(par)
+    statement :: proc(using par: ^Parser) {
+        key := tok
+        next(par) // eat the identifier
+        mem: Member
+        defer doc.members[key.value] = mem
+
+        for !exit do #partial switch tok.type {
+        case .Equals:
+            next(par) // eat '='
+            mem.expr = generic_expr(par)
+
+        case .LineStart: // End at line starts
+            next(par)
             return
+        case .Identifier:
+            if mem.expr != nil {
+                errorf(par, "Expected end of Statement, got '{}'", tok.value)
+            } else {
+                errorf(par, "'{}' not expected", tok.value)
+            }
+            recover(par)
         case:
-            log.error("Unexpected:", tok)
             unexpected(par)
+            
+            // Recover from errors
+            recover(par)
         }
-        return
     }
     
-    member :: proc(using par: ^Parser) -> (mem: Member, ok: bool) {
-
-        #partial switch par.tok.type {
-        case .Equals:
-            next(par) // consume '='
-            
-            // Seek range to 
-
-
-            mem.expr = root_expr(par)
-            ok = true
-        // TODO:
-        //  :  decorator
-        //  :: objects
-        //  () for functions
-        case:
-            unexpected(par)
-        }
-        return
-    }
-
-    root_expr :: proc(using par: ^Parser) -> Expr {
+    generic_expr :: proc(using par: ^Parser) -> Expr {
         left := primary_expr(par)
         if left == nil do return nil
 
@@ -143,20 +139,40 @@ parse :: proc(
     }
 
     primary_expr :: proc(using par: ^Parser) -> Expr {
-        #partial switch par.tok.type {
-        case .NumberLiteral:
-            return number_expr(par)
-        case .Identifier:
-            return identifier_expr(par)
-        case:
-            unexpected(par)
+        for {
+            #partial switch par.tok.type {
+            case .Paren_Left:
+                return paren_expr(par)
+            case .NumberLiteral:
+                return number_expr(par)
+            case .Identifier:
+                return identifier_expr(par)
+            case .StringLiteral:
+                return string_expr(par)
+            case .LineStart:
+                if paren_scope > 0 {
+                    next(par) // skip the new-line
+                    continue  // try with the next statement
+                }
+                errorf(par, "Expected value")
+                next(par)
+            case:
+                unexpected(par)
+            }
+            return nil
         }
-        return nil
     }
 
     binop_expr :: proc(using par: ^Parser, left: Expr, left_prec: int) -> Expr {
         left := left
         for {
+            // If inside paren, skip lines
+            if paren_scope > 0 {
+                for tok.type == .LineStart {
+                    next(par)
+                }
+            }
+
             prec := precedence(tok.type)
             
             if prec < left_prec {
@@ -229,14 +245,29 @@ parse :: proc(
 
     paren_expr :: proc(using par: ^Parser) -> Expr {
         next(par) // eat (
-        contents := root_expr(par)
+        paren_scope += 1
+        contents := generic_expr(par)
         if contents == nil {
+            paren_scope -= 1
             return nil
         }
 
+        
         if tok.type != .Paren_Right {
-            errorf(par, "Excpected ')'", )
+            // Recover
+            rec: for do #partial switch tok.type {
+            case .Paren_Right:
+                break rec
+            case .Unknown: // End of file..
+                fallthrough
+            case:
+                if exit do break rec
+                next(par) // New lines will be skipped ...
+            }
+            errorf(par, "Excpected ')', got '{}'", tok.value)
+            
         }
+        paren_scope -= 1
         next(par)
         return contents
     }
@@ -253,6 +284,53 @@ parse :: proc(
         return Expr_Number { value = ok ? val : 0 }
     }
 
+    string_expr :: proc(using par: ^Parser) -> Expr_String {
+        lit := tok
+        next(par) // eat the string
+
+        return { value = lit.value }
+
+        // read : str.Reader
+        // str.reader_init(&read, lit.value)
+        // build := str.builder_make(context.temp_allocator)
+        // char: rune
+        // for str.reader_length(&read) > 0 {
+        //     char, _, _ = str.reader_read_rune(&read) // next
+        //     // BASE
+        //     switch char {
+        //     case '\\':
+        //         char, _, _ = str.reader_read_rune(&read) // next
+        //         // ESCAPE CHARS
+        //         switch char {
+        //         case 'a': str.write_rune(&build, '\a')
+        //         case 'b': str.write_rune(&build, '\b')
+        //         case 'e': str.write_rune(&build, '\e')
+        //         case 'f': str.write_rune(&build, '\f')
+        //         case 'n': str.write_rune(&build, '\n')
+        //         case 'r': str.write_rune(&build, '\r')
+        //         case 't': str.write_rune(&build, '\t')
+        //         case 'v': str.write_rune(&build, '\v')
+        //         case '\\': str.write_rune(&build, '\\')
+        //         // TODO: Octal, Hexadecimal, Unicode16, Unicode32
+        //         case '"':
+        //             errorf(par, ` '\{}'`, char)
+        //         case:
+        //             // error
+        //             errorf(par, `Unknown escape sequence '\{}'`, char)
+        //         }
+        //         char, _, _ = str.reader_read_rune(&read) // next
+        //     case:
+        //         str.write_rune(&build, char)
+        //     }
+        // }
+        // ex: Expr_String
+        // ex.value = str.clone(
+        //     str.to_string(build),
+        //     runtime.arena_allocator(&doc.arena),
+        // )
+        // return ex
+    }
+
     // finish_expr :: proc(using par: ^Parser) -> []Expr {
     //     if len(exprbuffer) == 0 do return nil
 
@@ -261,24 +339,58 @@ parse :: proc(
     //     return slice
     // }
 
-    next :: proc(using par: ^Parser) {
-        tok_index += 1
-        if tok_index >= len(tokens) {
-            exit = true
-            tok = {}
-            return
+    expect :: proc(
+        using par: ^Parser,
+        type: TokType,
+        loc := #caller_location,
+    ) -> (current: Tok, ok: bool) {
+        current = tok
+        ok = tok.type == type
+        if !ok {
+            unexpected(par, loc)
+        } else {
+            next(par) // eat the token
         }
-        tok = tokens[tok_index]
-
+        return
     }
 
-    unexpected :: proc(using par: ^Parser) {
+    next :: proc(using par: ^Parser) {
+        for {
+            tok_index += 1
+            if tok_index >= len(tokens) {
+                exit = true
+                tok = {}
+                return
+            }
+            tok = tokens[tok_index]
+
+
+            #partial switch tok.type {
+            case .Comment:
+                continue // Skip all comments
+            case .LineStart:
+                // Skip line tokens while inside parenthesis...
+                if paren_scope > 0 do continue
+                fallthrough
+            case:
+                return // Exit the function
+            }
+        }
+    }
+
+    recover :: proc(using par: ^Parser) {
+        for !exit && tok.type != .LineStart {
+            next(par)
+        }
+    }
+
+    unexpected :: proc(using par: ^Parser, loc := #caller_location) {
         append(&doc.errors, UserError {
             start = tok.start,
             end = tok.end,
             message = str.concatenate({
                 "Unhandled Token: ",
-                str.clone(fmt.tprint(tok)),
+                str.clone(fmt.tprint(tok, "from", loc.procedure)),
             }, runtime.arena_allocator(&doc.arena)),
         })
         next(par)
@@ -289,7 +401,9 @@ parse :: proc(
         msg := fmt.tprintfln(format, ..args)
 
         append(&doc.errors, UserError {
-            message = str.clone(msg, runtime.arena_allocator(&doc.arena))
+            message = str.clone(msg, runtime.arena_allocator(&doc.arena)),
+            start = tok.start,
+            end = tok.end,
         })
         // log.error("Err:", err.start.line, err.message)
     }
@@ -299,39 +413,4 @@ parse :: proc(
         n^ = data
         return n
     }
-
-    // section :: proc(
-    //     using doc: ^Package,
-    //     tokens: []Tok,
-    // ) {
-    //     if len(tokens) < 2 {
-    //         log.info("Small Section")
-    //         return
-    //     }
-    //     first := tokens[0]
-    //     last := tokens[len(tokens) - 1]
-    //     log.infof("S: [{}] {} .. {}", len(tokens), first, last)
-    //     if first.type != .LineStart {
-    //         // Add syntax error
-    //         append(&errors, UserError {
-    //             start = first.start,
-    //             end = last.end,
-    //             message = "Parser: line not started",
-    //         })
-    //         return
-    //     }
-
-    //     // Expect
-
-    // }
-    
-    // append(&nodes, ..[]Node {
-    //     { type = .None, delta = 0 },
-    //     { type = .None, delta = 2 },
-    //         { type = .None, delta = 1 },
-    //             { type = .None, delta = 0 },
-    //         { type = .None, delta = 0 },
-
-    // })
-
 }

@@ -16,6 +16,7 @@ TokType :: enum u16 {
     NumberLiteral,
 
     // TODO: Comments (# <> or #{ }#)
+    Comment, // # comments, #[]#
 
     Brace_Left,
     Brace_Right,
