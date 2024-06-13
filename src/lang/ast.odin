@@ -25,7 +25,7 @@ UserError :: struct {
 Object :: map[string]Member
 
 Member :: struct {
-    // deco: ^Con, // Con is the function to call
+    // deco: Expr, // 
     expr: Expr, // 
     // args: ^Con, // 
 }
@@ -35,6 +35,7 @@ Expr :: union {
     Expr_Number,
     Expr_String,
     Expr_Operation,
+    Expr_Call,
     Object,
 }
 
@@ -53,15 +54,14 @@ Expr_Operation :: struct {
     chilren: [dynamic]Expr,
 }
 
+Expr_Call :: struct {
+    callee: string,
+    args: [dynamic]Expr,
+}
+
 Operator :: enum {
     Add, Sub, Mul, Div,
 }
-
-Expr_Call :: struct {
-    callee: string,
-    chilren: [dynamic]Expr,
-}
-
 
 Parser :: struct {
     tokens: ^[dynamic]Tok,
@@ -232,15 +232,47 @@ parse :: proc(
         id := tok
         next(par) // eat the identifier
 
-        return Expr_Var(id.value)
-        
         // Variable Reference
-        // if tok.type != .Paren_Left {
-        //     append(&exprbuffer, Expr_Var(id.value))
-        //     return true
-        // }
+        if tok.type != .Paren_Left {
+            return Expr_Var(id.value)
+        }
 
-        // TODO: Function Calls!
+        paren_scope += 1
+
+        next(par) // eat '('
+        call := Expr_Call {
+            callee = id.value,
+        }
+        if tok.type == .Paren_Right {
+            paren_scope -= 1
+            next(par) // eat ')'
+            return call
+        }
+        call.args = make([dynamic]Expr, runtime.arena_allocator(&doc.arena))
+        
+        for {
+            arg := generic_expr(par)
+            if arg == nil {
+                paren_scope -= 1
+                return nil // TODO: Recover from error ?
+            }
+            append(&call.args, arg)
+
+
+            if tok.type == .Paren_Right {
+                paren_scope -= 1
+                next(par) // eat ')'        
+                return call
+            }
+
+            if tok.type != .Comma {
+                errorf(par,
+                    "Expected ')' or ',' in argument list, got '{}'",
+                    tok.value,
+                )
+            }
+            next(par)
+        }
     }
 
     paren_expr :: proc(using par: ^Parser) -> Expr {

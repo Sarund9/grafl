@@ -111,7 +111,7 @@ parser :: proc(_: ^testing.T) {
     }
     */
     source := `
-hello = "World"
+
 `
 
     lex: Lexer
@@ -168,9 +168,13 @@ hello = "World"
         for i in 0..<indent do fmt.print("  ")
 
         wprint(out, key)
-        write_string(out, ":\n")
-        indent += 1
-        defer indent -= 1
+        write_string(out, " = ")
+        print_expr(out, mem.expr, &indent)
+        write_string(out, "\n")
+
+        // write_string(out, ":\n")
+        // indent += 1
+        // defer indent -= 1
 
         // ARGS
         // for i in 0..<indent do write_string(&build, "  ")
@@ -183,10 +187,9 @@ hello = "World"
         // TODO
 
         // VALUE
-        for i in 0..<indent do write_string(out, "  ")
-        write_string(out, "value = ")
+        // for i in 0..<indent do write_string(out, "  ")
+        // write_string(out, "value = ")
         
-        print_expr(out, mem.expr, &indent)
     }
 
     print_expr :: proc(out: io.Writer, expr: lang.Expr, indent: ^int) {
@@ -195,30 +198,49 @@ hello = "World"
         switch e in expr {
         case Expr_Number:
             wprint(out, e.value)
-            write_string(out, "\n")
         case Expr_String:
             write_quoted_string(out, e.value)
-            write_string(out, "\n")
         case Expr_Operation:
-            wprint(out, e.operator)
-            write_string(out, "(\n")
+            // wprint(out, e.operator)
+            write_rune(out, op_icon(e.operator))
+            write_string(out, "(")
 
-            indent^ += 1
-            for child in e.chilren {
-                for i in 0..<indent^ do write_string(out, "  ")
+            // indent^ += 1
+            for child, index in e.chilren {
+                // for i in 0..<indent^ do write_string(out, "  ")
                 print_expr(out, child, indent)
+                if index == len(e.chilren) - 1 do break
+                write_string(out, ", ")
             }
-            indent^ -= 1
-            for i in 0..<indent^ do write_string(out, "  ")
-            write_string(out, ")\n")
+            // indent^ -= 1
+            // for i in 0..<indent^ do write_string(out, "  ")
+            write_string(out, ")")
+        case Expr_Call:
+            write_string(out, e.callee)
+            write_string(out, "(")
+            for arg, index in e.args {
+                // for i in 0..<indent^ do write_string(out, "  ")
+                print_expr(out, arg, indent)
+                if index == len(e.args) - 1 do break
+                write_string(out, ", ")
+            }
+            write_string(out, ")")
         case Expr_Var:
             write_string(out, "$")
             wprint(out, e)
-            write_string(out, "\n")
         case Object:
-            write_string(out, "{ ... }\n")
+            write_string(out, "{ ... }")
         case:
-            write_string(out, "\n")
+        }
+
+        op_icon :: proc(op: Operator) -> rune {
+            switch op {
+            case .Add: return '+'
+            case .Sub: return '-'
+            case .Mul: return '*'
+            case .Div: return '/'
+            }
+            unreachable()
         }
     }
 
