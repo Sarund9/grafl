@@ -111,7 +111,7 @@ parser :: proc(_: ^testing.T) {
     }
     */
     source := `
-
+a(b) = b + 5
 `
 
     lex: Lexer
@@ -168,6 +168,16 @@ parser :: proc(_: ^testing.T) {
         for i in 0..<indent do fmt.print("  ")
 
         wprint(out, key)
+        if mem.params != nil {
+            write_string(out, "(")
+            for param, index in mem.params {
+                write_string(out, param.name)
+                if index == len(mem.params) - 1 do break
+                write_string(out, ", ")
+            }
+            write_string(out, ")")
+        }
+
         write_string(out, " = ")
         print_expr(out, mem.expr, &indent)
         write_string(out, "\n")

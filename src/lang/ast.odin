@@ -27,7 +27,12 @@ Object :: map[string]Member
 Member :: struct {
     // deco: Expr, // 
     expr: Expr, // 
-    // args: ^Con, // 
+    params: [dynamic]Param, // 
+}
+
+Param :: struct {
+    name: string,
+    // deco: Expr, // 
 }
 
 Expr :: union {
@@ -109,6 +114,8 @@ parse :: proc(
         defer doc.members[key.value] = mem
 
         for !exit do #partial switch tok.type {
+        case .Paren_Left: // FUNCTION DEFINITION
+            function_args(par, &mem)
         case .Equals:
             next(par) // eat '='
             mem.expr = generic_expr(par)
@@ -131,6 +138,40 @@ parse :: proc(
         }
     }
     
+    function_args :: proc(using par: ^Parser, mem: ^Member) {
+        next(par) // eat '('
+        mem.params = make([dynamic]Param, runtime.arena_allocator(&doc.arena))
+
+        // TODO: 2 state machines
+
+        param: Param
+        for do #partial switch tok.type {
+        case .Identifier:
+            if param.name != "" {
+                errorf(par, "Expected end of Argument..")
+            } else {
+                param.name = tok.value
+            }
+            next(par)
+        case .Comma:
+            if param.name == "" {
+                errorf(par, "Expected function parameter name")
+            }
+            append(&mem.params, param)
+            param.name = ""
+            next(par)
+        case .Paren_Right:
+            if param.name != "" {
+                // Append last parameter
+                append(&mem.params, param)
+            }
+            next(par) // eat ')'
+            return
+        case:
+            unexpected(par)
+        }
+    }
+
     generic_expr :: proc(using par: ^Parser) -> Expr {
         left := primary_expr(par)
         if left == nil do return nil
