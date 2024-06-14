@@ -25,9 +25,9 @@ UserError :: struct {
 Object :: map[string]Member
 
 Member :: struct {
-    // deco: Expr, // 
     expr: Expr, // 
     params: [dynamic]Param, // 
+    deco: [dynamic]Expr_Call, // 
 }
 
 Param :: struct {
@@ -111,15 +111,31 @@ parse :: proc(
         key := tok
         next(par) // eat the identifier
         mem: Member
-        defer doc.members[key.value] = mem
+        eq: bool
+        
+        defer {
+            // TODO: Check that the Member is assigned to something
+            doc.members[key.value] = mem
+        }
 
         for !exit do #partial switch tok.type {
         case .Paren_Left: // FUNCTION DEFINITION
-            function_args(par, &mem)
+            function_params(par, &mem)
         case .Equals:
+            if eq {
+                recover(par)
+                errorf(par, "Cannot assign to Property twice")
+                break
+            }
             next(par) // eat '='
+            eq = true
             mem.expr = generic_expr(par)
-
+        case .Colon:
+            if mem.deco == nil {
+                decoration_expr(par, &mem)
+            } else {
+                errorf(par, "Cannot ")
+            }
         case .LineStart: // End at line starts
             next(par)
             return
@@ -138,14 +154,14 @@ parse :: proc(
         }
     }
     
-    function_args :: proc(using par: ^Parser, mem: ^Member) {
+    function_params :: proc(using par: ^Parser, mem: ^Member) {
         next(par) // eat '('
-        mem.params = make([dynamic]Param, runtime.arena_allocator(&doc.arena))
+        mem.params = make([dynamic]Param, pool(par))
 
         // TODO: 2 state machines
 
         param: Param
-        for do #partial switch tok.type {
+        for !exit do #partial switch tok.type {
         case .Identifier:
             if param.name != "" {
                 errorf(par, "Expected end of Argument..")
@@ -167,6 +183,50 @@ parse :: proc(
             }
             next(par) // eat ')'
             return
+        case .LineStart:
+            next(par) // eat ')'
+        case:
+            unexpected(par)
+        }
+        // If we reach this, we have not closed the ')'
+        errorf(par, "Function Params not closed")
+    }
+
+    decoration_expr :: proc(using par: ^Parser, mem: ^Member) {
+        next(par) // eat ':'
+        if tok.type == .LineStart {
+            errorf(par, "Expected decorator argument")
+            return
+        }
+        // TODO: Object
+        //  Raise some scope here, then continue normally
+        if tok.type == .Colon {
+            next(par)
+        }
+        
+        mem.deco = make([dynamic]Expr_Call, pool(par))
+
+        for !exit do #partial switch tok.type {
+        case .Identifier:
+            id := tok
+            next(par) // eat the identifier
+
+            // If there's a left parenthesis, do a function call
+            if tok.type == .Paren_Left {
+                call, ok := call_expr(par, id.value)
+                if !ok {
+                    errorf(par, "Decorator syntax error")
+                }
+                append(&mem.deco, call)
+            } else {
+                // Assume identifiers as function calls.
+                append(&mem.deco, Expr_Call {
+                    callee = id.value,
+                })
+            }
+
+        case .LineStart:
+            return // Exit out
         case:
             unexpected(par)
         }
@@ -244,7 +304,7 @@ parse :: proc(
 
             ex := Expr_Operation {
                 operator = op,
-                chilren = make([dynamic]Expr, runtime.arena_allocator(&doc.arena))
+                chilren = make([dynamic]Expr, pool(par))
             }
             append(&ex.chilren, left)
             append(&ex.chilren, right)
@@ -278,24 +338,35 @@ parse :: proc(
             return Expr_Var(id.value)
         }
 
-        paren_scope += 1
-
-        next(par) // eat '('
-        call := Expr_Call {
-            callee = id.value,
+        call, ok := call_expr(par, id.value)
+        if !ok {
+            // TODO: Delete ?
+            return nil
         }
+
+        return call
+    }
+
+    call_expr :: proc(
+        using par: ^Parser, callee: string,
+    ) -> (
+        call: Expr_Call, ok: bool,
+    ) {
+        paren_scope += 1
+        next(par) // eat '('
+        call.callee = callee
         if tok.type == .Paren_Right {
             paren_scope -= 1
             next(par) // eat ')'
-            return call
+            return call, true
         }
-        call.args = make([dynamic]Expr, runtime.arena_allocator(&doc.arena))
+        call.args = make([dynamic]Expr, pool(par))
         
         for {
             arg := generic_expr(par)
             if arg == nil {
                 paren_scope -= 1
-                return nil // TODO: Recover from error ?
+                return call, false // TODO: Recover from error ?
             }
             append(&call.args, arg)
 
@@ -303,7 +374,7 @@ parse :: proc(
             if tok.type == .Paren_Right {
                 paren_scope -= 1
                 next(par) // eat ')'        
-                return call
+                return call, true
             }
 
             if tok.type != .Comma {
@@ -362,55 +433,7 @@ parse :: proc(
         next(par) // eat the string
 
         return { value = lit.value }
-
-        // read : str.Reader
-        // str.reader_init(&read, lit.value)
-        // build := str.builder_make(context.temp_allocator)
-        // char: rune
-        // for str.reader_length(&read) > 0 {
-        //     char, _, _ = str.reader_read_rune(&read) // next
-        //     // BASE
-        //     switch char {
-        //     case '\\':
-        //         char, _, _ = str.reader_read_rune(&read) // next
-        //         // ESCAPE CHARS
-        //         switch char {
-        //         case 'a': str.write_rune(&build, '\a')
-        //         case 'b': str.write_rune(&build, '\b')
-        //         case 'e': str.write_rune(&build, '\e')
-        //         case 'f': str.write_rune(&build, '\f')
-        //         case 'n': str.write_rune(&build, '\n')
-        //         case 'r': str.write_rune(&build, '\r')
-        //         case 't': str.write_rune(&build, '\t')
-        //         case 'v': str.write_rune(&build, '\v')
-        //         case '\\': str.write_rune(&build, '\\')
-        //         // TODO: Octal, Hexadecimal, Unicode16, Unicode32
-        //         case '"':
-        //             errorf(par, ` '\{}'`, char)
-        //         case:
-        //             // error
-        //             errorf(par, `Unknown escape sequence '\{}'`, char)
-        //         }
-        //         char, _, _ = str.reader_read_rune(&read) // next
-        //     case:
-        //         str.write_rune(&build, char)
-        //     }
-        // }
-        // ex: Expr_String
-        // ex.value = str.clone(
-        //     str.to_string(build),
-        //     runtime.arena_allocator(&doc.arena),
-        // )
-        // return ex
     }
-
-    // finish_expr :: proc(using par: ^Parser) -> []Expr {
-    //     if len(exprbuffer) == 0 do return nil
-
-    //     slice := slice.clone(exprbuffer[:], runtime.arena_allocator(&doc.arena))
-    //     clear(&exprbuffer)
-    //     return slice
-    // }
 
     expect :: proc(
         using par: ^Parser,
@@ -464,7 +487,7 @@ parse :: proc(
             message = str.concatenate({
                 "Unhandled Token: ",
                 str.clone(fmt.tprint(tok, "from", loc.procedure)),
-            }, runtime.arena_allocator(&doc.arena)),
+            }, pool(par)),
         })
         next(par)
     }
@@ -474,7 +497,7 @@ parse :: proc(
         msg := fmt.tprintfln(format, ..args)
 
         append(&doc.errors, UserError {
-            message = str.clone(msg, runtime.arena_allocator(&doc.arena)),
+            message = str.clone(msg, pool(par)),
             start = tok.start,
             end = tok.end,
         })
@@ -482,8 +505,12 @@ parse :: proc(
     }
 
     node :: proc(using par: ^Parser, data: $T) -> ^T {
-        n := new(T, runtime.arena_allocator(&doc.arena))
+        n := new(T, pool(par))
         n^ = data
         return n
+    }
+
+    pool :: proc(using par: ^Parser) -> runtime.Allocator {
+        return runtime.arena_allocator(&doc.arena)
     }
 }

@@ -111,7 +111,7 @@ parser :: proc(_: ^testing.T) {
     }
     */
     source := `
-a(b) = b + 5
+foo(): f32
 `
 
     lex: Lexer
@@ -178,22 +178,33 @@ a(b) = b + 5
             write_string(out, ")")
         }
 
-        write_string(out, " = ")
-        print_expr(out, mem.expr, &indent)
+        if mem.expr != nil {
+            write_string(out, " = ")
+            print_expr(out, mem.expr, &indent)
+            write_string(out, " ")
+        }
+        
+        if mem.deco != nil {
+            write_string(out, ":\n")
+            indent += 1
+            defer indent -= 1
+    
+            // DECO
+            for i in 0..<indent do write_string(out, "  ")
+            for call in mem.deco {
+                write_string(out, call.callee)
+                write_string(out, "(")
+                for arg, index in call.args {
+                    // for i in 0..<indent^ do write_string(out, "  ")
+                    print_expr(out, arg, &indent)
+                    if index == len(call.args) - 1 do break
+                    write_string(out, ", ")
+                }
+                write_string(out, ")")
+            }
+        }
         write_string(out, "\n")
 
-        // write_string(out, ":\n")
-        // indent += 1
-        // defer indent -= 1
-
-        // ARGS
-        // for i in 0..<indent do write_string(&build, "  ")
-        // write_string(&build, "args:\n")
-        // TODO
-
-        // DECO
-        // for i in 0..<indent do write_string(&build, "  ")
-        // write_string(&build, "deco:\n")
         // TODO
 
         // VALUE
