@@ -13,6 +13,8 @@ import str "core:strings"
 Document :: struct {
     arena: runtime.Arena,
     
+    filepath: string,
+
     members: Object,
     errors: [dynamic]UserError,
 }
@@ -464,6 +466,12 @@ parse :: proc(
             #partial switch tok.type {
             case .Comment:
                 continue // Skip all comments
+            case .ErrorStringNotTerminated:
+                errorf(par, "String not closed: {}", tok.value)
+                continue // Skip errors
+            case .ErrorInvalidEscape:
+                errorf(par, "Invalid escape character: {}", tok.value)
+                continue // Skip errors
             case .LineStart:
                 // Skip line tokens while inside parenthesis...
                 if paren_scope > 0 do continue

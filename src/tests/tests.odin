@@ -14,6 +14,7 @@ import "core:time"
 import "core:slice"
 import "core:reflect"
 import "core:unicode/utf8"
+import "core:encoding/json"
 import tab "core:text/table"
 import str "core:strings"
 
@@ -111,8 +112,8 @@ parser :: proc(_: ^testing.T) {
     }
     */
     source := `
-foo(): f32
-`
+    foo(): f32
+    `
 
     lex: Lexer
     par: Parser
@@ -406,7 +407,34 @@ main :: proc() {
     // fmt.wprint()
 
     // lexer({})
-    parser({})
+    // parser({})
+    mod: lang.Module
+    lang.load_module(&mod, "sandbox")
+
+    build: str.Builder
+
+    for doc in mod.docs {
+        fmt.sbprintf(&build, "{} :: ", doc.filepath)
+        fmt.sbprintfln(&build, "%#v", doc.members)
+        for err in doc.errors {
+            fmt.sbprintfln(&build, " > {}", err.message)
+        }
+    }
+
+    out := io.to_write_flusher(os.stream_from_handle(os.stdout))
+
+    for b in build.buf do switch b {
+    case '\t':
+        io.write_string(out, "   ")
+    case '{':
+        io.write_byte(out, ' ')
+        fallthrough
+    case:
+        io.write_byte(out, b)
+    }
+    
+    lang.derive_print(&mod, "s")
+    
 }
 
 start_table :: proc(header_entries: ..string) -> ^tab.Table {

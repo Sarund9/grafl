@@ -10,6 +10,10 @@ Tok :: struct {
 
 TokType :: enum u16 {
     Unknown,
+
+    ErrorInvalidEscape, // Invalid escape character in string literal
+    ErrorStringNotTerminated, // String literal not before the end of the line
+
     Identifier,
     LineStart, // First token each line, points to the line's whitespace
     StringLiteral,

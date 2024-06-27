@@ -38,6 +38,17 @@ tokenize_src :: proc(
     tokeinze(lex, str.to_reader(&read, source))
 }
 
+tokenize_file :: proc(
+    using lex: ^Lexer,
+    filepath: string,
+) {
+    handle, err := os.open(filepath)
+    if err != os.ERROR_NONE do return
+    defer os.close(handle)
+
+    tokeinze(lex, io.to_reader(os.stream_from_handle(handle)))
+}
+
 tokeinze :: proc(
     using lex: ^Lexer,
     reader: io.Reader,
@@ -177,12 +188,45 @@ tokeinze :: proc(
             return
         case '\n', '\r':
             // ERROR: unterminated string
+            send(lex, .ErrorStringNotTerminated, clear_buffer = false)
             return
+        case '\\':
+            escape_seq(lex)
         case:
+            str.write_rune(&stringBuffer, char)
             next(lex)
 
             if exit {
-                // ERROR: unterminated string
+                send(lex, .ErrorStringNotTerminated, clear_buffer = false)
+                return
+            }
+        }
+
+        escape_seq :: proc(using lex: ^Lexer) {
+            next(lex) // eat '\'
+            if exit {
+                send(lex, .ErrorStringNotTerminated, clear_buffer = false)
+                return
+            }
+            switch char {
+            case 'a':  str.write_rune(&stringBuffer, '\a')
+            case 'b':  str.write_rune(&stringBuffer, '\b')
+            case 'e':  str.write_rune(&stringBuffer, '\e')
+            case 'f':  str.write_rune(&stringBuffer, '\f')
+            case 'n':  str.write_rune(&stringBuffer, '\n')
+            case 'r':  str.write_rune(&stringBuffer, '\r')
+            case 't':  str.write_rune(&stringBuffer, '\t')
+            case 'v':  str.write_rune(&stringBuffer, '\v')
+            case '\\': str.write_rune(&stringBuffer, '\\')
+            case '\"': str.write_rune(&stringBuffer, '\"')
+            case '\'': str.write_rune(&stringBuffer, '\'')
+            // TODO: HEX Escape Codes
+            case:
+                send(lex, .ErrorInvalidEscape, clear_buffer = false)
+            }
+            next(lex) // Eat the escape char
+            if exit {
+                send(lex, .ErrorStringNotTerminated, clear_buffer = false)
                 return
             }
         }
@@ -230,6 +274,7 @@ tokeinze :: proc(
     send :: proc(
         using lex: ^Lexer, type: TokType,
         use_current := false,
+        clear_buffer := true,
     ) {
         tok := Tok {
             type = type,
@@ -242,7 +287,9 @@ tokeinze :: proc(
                 str.to_string(stringBuffer),
                 runtime.arena_allocator(&stringArena)
             )
-            str.builder_reset(&stringBuffer)
+            if clear_buffer {
+                str.builder_reset(&stringBuffer)
+            }
         }
 
         append(&tokens, tok)
