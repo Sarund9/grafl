@@ -6,7 +6,7 @@
             "type": "shell",
             "command": "odin",
             "args": [
-                "run", "src/tests"
+                "test", "src/tests",
             ],
             "group": {
                 "kind": "build",

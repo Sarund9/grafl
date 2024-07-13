@@ -13,7 +13,7 @@ import str "core:strings"
 
 
 Lexer :: struct {
-    stringArena: runtime.Arena,
+    doc: ^Document,
 
     stream: io.Reader,
     stringBuffer: str.Builder,
@@ -285,7 +285,7 @@ tokeinze :: proc(
         if str.builder_len(stringBuffer) > 0 {
             tok.value = str.clone(
                 str.to_string(stringBuffer),
-                runtime.arena_allocator(&stringArena)
+                runtime.arena_allocator(&doc.arena)
             )
             if clear_buffer {
                 str.builder_reset(&stringBuffer)
